@@ -30,7 +30,7 @@ def load_classes(path):
 def test(data,
          weights=None,
          batch_size=16,
-         imgsz=640,
+         imgsz=1280,
          conf_thres=0.001,
          iou_thres=0.6,  # for NMS
          save_json=False,
@@ -40,9 +40,10 @@ def test(data,
          model=None,
          dataloader=None,
          save_dir=Path(''),  # for saving images
+         merge_nms=False,
          save_txt=False,  # for auto-labelling
          save_conf=False,
-         plots=True,
+         plots=False,
          log_imgs=0):  # number of logged images
 
     # Initialize/load model and set device
@@ -54,6 +55,7 @@ def test(data,
         set_logging()
         device = select_device(opt.device, batch_size=batch_size)
         save_txt = opt.save_txt  # save *.txt labels
+        merge_nms = opt.merge_nms
 
         # Directories
         save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
@@ -111,6 +113,7 @@ def test(data,
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
+        objects = []
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -131,7 +134,7 @@ def test(data,
 
             # Run NMS
             t = time_synchronized()
-            output = non_max_suppression(inf_out, conf_thres=conf_thres, iou_thres=iou_thres)
+            output = non_max_suppression(inf_out, conf_thres=conf_thres, iou_thres=iou_thres, merge=merge_nms)
             t1 += time_synchronized() - t
 
         # Statistics per image
@@ -174,14 +177,14 @@ def test(data,
             # Append to pycocotools JSON dictionary
             if save_json:
                 # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
-                image_id = int(path.stem) if path.stem.isnumeric() else path.stem
+                image_id =  path.stem
                 box = pred[:, :4].clone()  # xyxy
                 scale_coords(img[si].shape[1:], box, shapes[si][0], shapes[si][1])  # to original shape
                 box = xyxy2xywh(box)  # xywh
                 box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
                 for p, b in zip(pred.tolist(), box.tolist()):
                     jdict.append({'image_id': image_id,
-                                  'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
+                                  'category_id': int(p[5]),
                                   'bbox': [round(x, 3) for x in b],
                                   'score': round(p[4], 5)})
 
@@ -257,27 +260,11 @@ def test(data,
     # Save JSON
     if save_json and len(jdict):
         w = Path(weights[0] if isinstance(weights, list) else weights).stem if weights is not None else ''  # weights
-        anno_json = glob.glob('../coco/annotations/instances_val*.json')[0]  # annotations json
+        
         pred_json = str(save_dir / f"{w}_predictions.json")  # predictions json
         print('\nEvaluating pycocotools mAP... saving %s...' % pred_json)
         with open(pred_json, 'w') as f:
             json.dump(jdict, f)
-
-        try:  # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
-            from pycocotools.coco import COCO
-            from pycocotools.cocoeval import COCOeval
-
-            anno = COCO(anno_json)  # init annotations api
-            pred = anno.loadRes(pred_json)  # init predictions api
-            eval = COCOeval(anno, pred, 'bbox')
-            if is_coco:
-                eval.params.imgIds = [int(Path(x).stem) for x in dataloader.dataset.img_files]  # image IDs to evaluate
-            eval.evaluate()
-            eval.accumulate()
-            eval.summarize()
-            map, map50 = eval.stats[:2]  # update results (mAP@0.5:0.95, mAP@0.5)
-        except Exception as e:
-            print('ERROR: pycocotools unable to run: %s' % e)
 
     # Return results
     if not training:
@@ -292,14 +279,15 @@ def test(data,
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
     parser.add_argument('--weights', nargs='+', type=str, default='yolor_p6.pt', help='model.pt path(s)')
-    parser.add_argument('--data', type=str, default='data/coco.yaml', help='*.data path')
+    parser.add_argument('--data', type=str, default='data/custom.yaml', help='*.data path')
     parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
     parser.add_argument('--img-size', type=int, default=1280, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.65, help='IOU threshold for NMS')
-    parser.add_argument('--task', default='val', help="'val', 'test', 'study'")
-    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--task', default='test', help="'val', 'test', 'study'")
+    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--single-cls', action='store_true', help='treat as single-class dataset')
+    parser.add_argument('--merge-nms', action='store_true', help='use merging for NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--verbose', action='store_true', help='report mAP by class')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
@@ -308,8 +296,8 @@ if __name__ == '__main__':
     parser.add_argument('--project', default='runs/test', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
-    parser.add_argument('--cfg', type=str, default='cfg/yolor_p6.cfg', help='*.cfg path')
-    parser.add_argument('--names', type=str, default='data/coco.names', help='*.cfg path')
+    parser.add_argument('--cfg', type=str, default='cfg/yolor_p6_custom.cfg', help='*.cfg path')
+    parser.add_argument('--names', type=str, default='data/custom.names', help='*.cfg path')
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith('coco.yaml')
     opt.data = check_file(opt.data)  # check file

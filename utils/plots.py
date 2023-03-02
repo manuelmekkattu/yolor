@@ -95,6 +95,7 @@ def output_to_target(output, width, height):
     for i, o in enumerate(output):
         if o is not None:
             for pred in o:
+                pred = pred.cpu()
                 box = pred[:4]
                 w = (box[2] - box[0]) / width
                 h = (box[3] - box[1]) / height
@@ -105,6 +106,7 @@ def output_to_target(output, width, height):
 
                 targets.append([i, cls, x, y, w, h, conf])
 
+    #return np.array(targets.cpu())
     return np.array(targets)
 
 

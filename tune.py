@@ -35,11 +35,11 @@ from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_di
 
 logger = logging.getLogger(__name__)
 
-try:
-    import wandb
-except ImportError:
-    wandb = None
-    logger.info("Install Weights & Biases for experiment logging via 'pip install wandb' (recommended)")
+#try:
+#    import wandb
+#except ImportError:
+wandb = None
+#    logger.info("Install Weights & Biases for experiment logging via 'pip install wandb' (recommended)")
 
 def train(hyp, opt, device, tb_writer=None, wandb=None):
     logger.info(f'Hyperparameters {hyp}')
@@ -457,9 +457,9 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='yolor_p6.pt', help='initial weights path')
-    parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
-    parser.add_argument('--data', type=str, default='data/coco.yaml', help='data.yaml path')
-    parser.add_argument('--hyp', type=str, default='data/hyp.scratch.1280.yaml', help='hyperparameters path')
+    parser.add_argument('--cfg', type=str, default='cfg/yolor_p6_custom.cfg', help='model.yaml path')
+    parser.add_argument('--data', type=str, default='data/custom.yaml', help='data.yaml path')
+    parser.add_argument('--hyp', type=str, default='data/hyp.finetune.1280.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--batch-size', type=int, default=8, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[1280, 1280], help='[train, test] image sizes')
